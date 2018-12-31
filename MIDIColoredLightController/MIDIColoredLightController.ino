@@ -37,6 +37,28 @@
 
 #define ORANGE_WIDTH 10
 
+// Defines HSV for all notes for one channel
+struct NotesHSV {
+  byte note_brightness[NUM_NOTES];
+  byte note_saturation[NUM_NOTES];
+  byte note_hue[NUM_NOTES];
+};
+
+// Defines all state for a single channel
+struct NoteState {
+  byte modulation;
+  byte pitch_bend;
+  byte volume;
+  byte data_knob;
+  byte note_number;
+  byte velocity;
+  boolean note_on_state[NUM_NOTES];
+  NotesHSV note_hsv_state;
+};
+
+// Array of NoteStates structs, one per channel
+NoteState State[1];
+
 boolean note_on_state[NUM_NOTES] = {0};
 boolean white_note_on_state[NUM_NOTES] = {0};
 boolean symmetric_mode_on = false;
@@ -54,7 +76,6 @@ float pulsing_time_scale = 1;
 float pulse_min_brightness = 0;
 float pitch_counter = 0;
 float last_pitch_command = 0;
-byte last_velocity = 0;
 const byte mode_note_ranges[5][2] = {{0, 23}, {24, 47}, {48, 71}, {72, 95}, {96, 119}};
 byte curr_lowest_note = 0;
 byte note_brightness[NUM_NOTES] = {0};
@@ -177,6 +198,7 @@ uint8_t gHue = 0; // rotating "base color" used by many of the patterns
 uint8_t gradient_counter = 0;
 
 CRGB leds[NUM_STRIPS * NUM_LEDS_PER_STRIP];
+// CRGB leds2[NUM_STRIPS * NUM_LEDS_PER_STRIP];
 
 // Pin layouts on the teensy 3:
 // OctoWS2811: 2,14,7,8,6,20,21,5
@@ -261,7 +283,7 @@ void command_on_notes(void){
           float sin_min = 255 * (1 - ((-last_pitch_command+63) / (PITCH_CENTER_VALUE - 1)));
           float sin_amp = (255 - sin_min) / 2;
           float sin_offset = (255 + sin_min) / 2;
-          note_brightness[i] = sin_amp * sin(pitch_counter) + sin_offset;
+          State[0].note_hsv_state.note_brightness[i] = sin_amp * sin(pitch_counter) + sin_offset;
         }
         // Only refill them if we're in the right block of time
         if (millis() < (last_turn_on_time + (float(strobe_length_ms) / 2))){
@@ -272,7 +294,7 @@ void command_on_notes(void){
             center_fill(note_regions[j][0], note_regions[j][1], i);
           }
           else{
-            fill_gradient(leds, note_regions[j][0], CHSV(note_hue[i],Saturation,note_brightness[i]), note_regions[j][1], CHSV(note_hue[i],Saturation,note_brightness[i]), SHORTEST_HUES);
+            fill_gradient(leds, note_regions[j][0], CHSV(State[0].note_hsv_state.note_hue[i],Saturation,State[0].note_hsv_state.note_brightness[i]), note_regions[j][1], CHSV(note_hue[i],Saturation,State[0].note_hsv_state.note_brightness[i]), SHORTEST_HUES);
           }
         }
       }
@@ -331,6 +353,18 @@ void update_modes(byte data1){
     }
 }
 
+void saveMIDI(void) {
+  byte type, channel, data1, data2, cable;
+
+  // fetch the MIDI message, defined by these 5 numbers (except SysEX)
+  //
+  type = usbMIDI.getType();       // which MIDI message, 128-255
+  channel = usbMIDI.getChannel(); // which MIDI channel, 1-16
+  data1 = usbMIDI.getData1();     // first data byte of message, 0-127
+  data2 = usbMIDI.getData2();     // second data byte of message, 0-127
+  cable = usbMIDI.getCable();     // which virtual cable with MIDIx8, 0-7
+}
+
 void processMIDI(void) {
   byte type, channel, data1, data2, cable;
 
@@ -346,9 +380,9 @@ void processMIDI(void) {
   ////Serial.print("cable ");
   ////Serial.print(cable, DEC);
   ////Serial.print(": ");
-
   // print info about the message
   //
+
   switch (type) {
     case usbMIDI.NoteOff: // 0x80
       //Serial.print("Note Off, ch=");
@@ -362,9 +396,9 @@ void processMIDI(void) {
       idx = min((data1-curr_lowest_note),NUM_NOTES-1),23;
       Serial.println(idx);
       if (channel != 1){
-        note_on_state[idx] = 0;
+        State[0].note_on_state[idx] = 0;
         if (symmetric_mode_on){
-          note_on_state[mirror_note_num[idx]] = 0;
+          State[0].note_on_state[mirror_note_num[idx]] = 0;
           note_center_counter[mirror_note_num[idx]] = 0;
         }
         // Reset the note center counter to 0
@@ -395,24 +429,23 @@ void processMIDI(void) {
       if (data1 < (curr_lowest_note + NUM_NOTES)){
         if (channel != 1){
           // Toggle on state to on
-          note_on_state[idx] = 1;
+          State[0].note_on_state[idx] = 1;
           
           // Set brightness to scaled velocity value
-          last_velocity = (map(data2,0,127,0,255));
-          note_brightness[idx] = (map(data2,0,127,0,255));//data2;
+          State[0].note_hsv_state.note_brightness[idx] = (map(data2,0,127,0,255));//data2;
           note_max_brightness[idx] = (map(data2,0,127,0,255));//data2;
           if (symmetric_mode_on){
-            note_on_state[mirror_note_num[idx]] = 1;
-            note_brightness[mirror_note_num[idx]] = (map(data2,0,127,0,255));//data2;
+            State[0].note_on_state[mirror_note_num[idx]] = 1;
+            State[0].note_hsv_state.note_brightness[mirror_note_num[idx]] = (map(data2,0,127,0,255));//data2;
             note_max_brightness[mirror_note_num[idx]] = (map(data2,0,127,0,255));//data2;
           }
           
           // If we're in new color mode, increment the hue
           if ((curr_manual_mode == NOTE_NEW_COLOR) or (curr_manual_mode == CENTER_FILL_NEW_COLOR)){
-            note_hue[idx] = Hue;
+            State[0].note_hsv_state.note_hue[idx] = Hue;
              
             if (symmetric_mode_on){
-              note_hue[mirror_note_num[idx]] = Hue;
+              State[0].note_hsv_state.note_hue[mirror_note_num[idx]] = Hue;
             }
             Hue = Hue + 30;   
           }    
@@ -447,7 +480,7 @@ void processMIDI(void) {
         // Set color scheme based on knob value
         color_scheme_index = data2; //min(data2,10);
         for (int i = 0; i < NUM_NOTES; i++){
-          note_hue[i] = Hue;
+          State[0].note_hsv_state.note_hue[i] = Hue;
         }
       }
       else if (data1 == 7) { // volume slider 
@@ -496,17 +529,6 @@ void processMIDI(void) {
       if (data2 <= (PITCH_CENTER_VALUE - 1)){
         rainbow_saturation = int(map(data2,0,65,0,255)); // 
       }
-        //pulsing = true;
-        //last_pitch_command = data2;
-        //LEDS.setBrightness(last_velocity);
-//      }
-//      else {
-//        //pulsing = false;
-//        //LEDS.setBrightness(BRIGHTNESS);
-//      }
-//      if (curr_manual_mode == NOTE_RAINBOW){
-//        rainbow_saturation = int(map(data2,0,65,0,255)); // 
-//      }
 
       break;
 
@@ -587,10 +609,10 @@ void center_fill(int region_start, int region_end, int note_num){
   // Does one iteration to fill in notes from the center
   for (int i=region_start; i < region_end; i++){
     if ((i >= min_LED_turn_on) && (i <= max_LED_turn_on)){
-      leds[i] = CHSV(int(note_hue[note_num]), Saturation, note_brightness[note_num]);
+      leds[i] = CHSV(int(State[0].note_hsv_state.note_hue[note_num]), Saturation, State[0].note_hsv_state.note_brightness[note_num]);
     }
     else{
-      leds[i] = CHSV(int(note_hue[note_num]), Saturation, 0);
+      leds[i] = CHSV(int(State[0].note_hsv_state.note_hue[note_num]), Saturation, 0);
     }
   }
   note_center_counter[note_num] += center_counter_inc;
@@ -618,7 +640,7 @@ void note_rainbow(int region_start, int region_end, int note_num){
       fill_noise(color_scheme_index, region_start, region_end, note_num);
     }
   //gradient_counter += rainbow_hue_inc;
-  note_hue[note_num] += rainbow_hue_inc;
+  State[0].note_hsv_state.note_hue[note_num] += rainbow_hue_inc;
 }
 
 
@@ -637,13 +659,13 @@ void fill_standing_wave(int color_scheme_index, int region_start, int region_end
     int r_comp, g_comp, b_comp;
     uint16_t standing_wave_val = triwave8(uint8_t((255/STANDING_WAVE_WIDTH)*(i - region_start)))*triwave8(uint8_t((255/STANDING_WAVE_WIDTH)*(i - region_start)));
     uint8_t brightness_multiplier = triwave8(uint8_t(gradient_counter));
-    uint8_t how_bright = note_brightness[note_num]*standing_wave_val*brightness_multiplier/(255)/(255)/(255);
+    uint8_t how_bright = State[0].note_hsv_state.note_brightness[note_num]*standing_wave_val*brightness_multiplier/(255)/(255)/(255);
     CRGB start_rgb = CRGB(CHSV(start_colors_hue[color_scheme_index], rainbow_saturation, how_bright));
     
     //standing_wave_val = triwave8(uint8_t((255/STANDING_WAVE_WIDTH)*(i - region_start+STANDING_WAVE_WIDTH/2)))*triwave8(uint8_t((255/STANDING_WAVE_WIDTH)*(i - region_start+STANDING_WAVE_WIDTH/2)));
     standing_wave_val = triwave8(uint8_t((255/STANDING_WAVE_WIDTH)*(i - region_start)))*triwave8(uint8_t((255/STANDING_WAVE_WIDTH)*(i - region_start)));
     brightness_multiplier = triwave8(uint8_t(gradient_counter)+255/2);
-    how_bright = note_brightness[note_num]*standing_wave_val*brightness_multiplier/(255)/(255)/(255);
+    how_bright = State[0].note_hsv_state.note_brightness[note_num]*standing_wave_val*brightness_multiplier/(255)/(255)/(255);
     
     CRGB end_rgb = CRGB(CHSV(end_colors_hue[color_scheme_index], rainbow_saturation, how_bright));
     r_comp = (start_rgb.r+end_rgb.r)/2;
@@ -659,7 +681,7 @@ void fill_standing_wave_to_black(int color_scheme_index, int region_start, int r
     uint16_t standing_wave_val = triwave8(uint8_t((255/STANDING_WAVE_WIDTH)*(i - region_start))); //*triwave8(uint8_t((255/STANDING_WAVE_WIDTH)*(i - region_start)));
     uint8_t brightness_multiplier = triwave8(uint8_t(gradient_counter));
     
-    uint8_t how_bright = min(255,note_brightness[note_num]*standing_wave_val*brightness_multiplier/(255)/(255)+40);
+    uint8_t how_bright = min(255,State[0].note_hsv_state.note_brightness[note_num]*standing_wave_val*brightness_multiplier/(255)/(255)+40);
     CRGB start_rgb = CRGB(CHSV(start_colors_hue[color_scheme_index], rainbow_saturation, how_bright));
     CRGB end_rgb = CRGB(0,0,0);
     r_comp = (start_rgb.r+end_rgb.r);
@@ -676,8 +698,8 @@ void fill_sine_wave(int color_scheme_index, int region_start, int region_end, in
     int r_comp, g_comp, b_comp;
     // Map from color scheme index, hue, rainbow saturation to RGB start and stop values
     // Map from hsv to rgb
-    CRGB start_rgb = CRGB(CHSV(start_colors_hue[color_scheme_index], rainbow_saturation, note_brightness[note_num]));
-    CRGB end_rgb = CRGB(CHSV(end_colors_hue[color_scheme_index], rainbow_saturation, note_brightness[note_num]));
+    CRGB start_rgb = CRGB(CHSV(start_colors_hue[color_scheme_index], rainbow_saturation, State[0].note_hsv_state.note_brightness[note_num]));
+    CRGB end_rgb = CRGB(CHSV(end_colors_hue[color_scheme_index], rainbow_saturation, State[0].note_hsv_state.note_brightness[note_num]));
     // Map from hsv to rgb
     if (uint8_t(current_gradient_location+ORANGE_WIDTH) < ORANGE_WIDTH*2){
       r_comp = start_rgb.r;
@@ -709,8 +731,8 @@ void fill_sine_wave_fucking_crazy(int color_scheme_index, int region_start, int 
     int r_comp, g_comp, b_comp;
     // Map from color scheme index, hue, rainbow saturation to RGB start and stop values
     // Map from hsv to rgb
-    CRGB start_rgb = CRGB(CHSV(start_colors_hue[color_scheme_index], rainbow_saturation, note_brightness[note_num]));
-    CRGB end_rgb = CRGB(CHSV(end_colors_hue[color_scheme_index], rainbow_saturation, note_brightness[note_num]));
+    CRGB start_rgb = CRGB(CHSV(start_colors_hue[color_scheme_index], rainbow_saturation, State[0].note_hsv_state.note_brightness[note_num]));
+    CRGB end_rgb = CRGB(CHSV(end_colors_hue[color_scheme_index], rainbow_saturation, State[0].note_hsv_state.note_brightness[note_num]));
     // Map from hsv to rgb
   //  if (current_gradient_location < ORANGE_WIDTH){
   //    r_comp = start_rgb.r;
@@ -742,7 +764,7 @@ void fill_rain( int color_scheme_index, int region_start, int region_end, int no
     int r_comp, g_comp, b_comp;
     // Map from color scheme index, hue, rainbow saturation to RGB start and stop values
     // Map from hsv to rgb
-    CRGB start_rgb = CRGB(CHSV(start_colors_hue[color_scheme_index], rainbow_saturation, note_brightness[note_num]));
+    CRGB start_rgb = CRGB(CHSV(start_colors_hue[color_scheme_index], rainbow_saturation, State[0].note_hsv_state.note_brightness[note_num]));
     // Get black for rain, since black is not a hue
     CRGB end_rgb = CRGB(0, 0, 0);
     r_comp = uint8_t(max(0, current_gradient_location * (end_rgb.r - start_rgb.r) / 245 + start_rgb.r));
@@ -759,7 +781,7 @@ void fill_rain( int color_scheme_index, int region_start, int region_end, int no
 void fill_multicolor(int region_start, int region_end, int note_num){
   // Does one iteration of rainbow step for 
   for (int i=region_start; i < region_end; i++){
-    leds[i] = CHSV(int(note_hue[note_num])+i,192,note_brightness[note_num]);
+    leds[i] = CHSV(int(State[0].note_hsv_state.note_hue[note_num])+i,192,State[0].note_hsv_state.note_brightness[note_num]);
   }
   //note_hue[note_num] += rainbow_hue_inc;
 }
