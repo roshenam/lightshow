@@ -38,37 +38,44 @@ struct NoteState {
   float note_hue[NUM_NOTES];
   manual_modes curr_manual_mode = NORMAL;
   byte curr_lowest_note = 0;
+  byte decayRate = 255;
+  int strobe_length_ms = NO_STROBE_LENGTH;
 };
 
 // Array of NoteStates structs, one per channel
 NoteState State[1];
 
-boolean white_note_on_state[NUM_NOTES] = {0};
 boolean symmetric_mode_on = false;
 
 // Mode specific states
+// Pulsing
 boolean pulsing = false;
 float pulsing_time_scale = 1;
 float pulse_min_brightness = 0;
 float pitch_counter = 0;
 float last_pitch_command = 0;
-
-byte white_note_brightness[NUM_NOTES] = {0};
-byte note_max_brightness[NUM_NOTES] = {0};
+// Center Fill
 float note_center_counter[NUM_NOTES] = {0};
 float center_counter_inc = 1;
+// Rainbow
+float rainbow_hue_inc = 1;
+int rainbow_saturation = 255;
+int color_scheme_index = 0;
+uint8_t gradient_counter = 0;
+
+// White layer variables
+byte white_note_brightness[NUM_NOTES] = {0};
+byte note_max_brightness[NUM_NOTES] = {0};
+boolean white_note_on_state[NUM_NOTES] = {0};
 
 byte Hue = 1;
 byte Saturation = 1;
 
-byte decayRate = 255;
-float rainbow_hue_inc = 1;
-int color_scheme_index = 0;
-int rainbow_saturation = 255;
-int activeRegions[][2] = {{0}};
+// Timing variables
 unsigned long last_time = millis();
 unsigned long last_turn_on_time = millis();
-int strobe_length_ms = NO_STROBE_LENGTH;
+
+// Function defintions
 void note_rainbow(int region_start, int region_end, int note_num);
 void center_fill(int region_start, int region_end, int note_num);
 void rainbow();
@@ -77,12 +84,8 @@ void rainbowWithGlitter();
 typedef void (*SimplePatternList[])();
 SimplePatternList gPatterns = {rainbow, rainbowWithGlitter};
 
-uint8_t gCurrentPatternNumber = 0; // Index number of which pattern is current
-uint8_t gHue = 0; // rotating "base color" used by many of the patterns
-uint8_t gradient_counter = 0;
 
 CRGB leds[NUM_STRIPS * NUM_LEDS_PER_STRIP];
-// CRGB leds2[NUM_STRIPS * NUM_LEDS_PER_STRIP];
 
 // Pin layouts on the teensy 3:
 // OctoWS2811: 2,14,7,8,6,20,21,5
@@ -104,7 +107,7 @@ void loop() {
     last_time = millis();
   
 
-    if (millis() > (last_turn_on_time + strobe_length_ms)){
+    if (millis() > (last_turn_on_time + State[0].strobe_length_ms)){
       last_turn_on_time = millis();
     }
   
@@ -123,19 +126,19 @@ void loop() {
 boolean digital_fade_on = true;
 void fade_all(void){
   if (digital_fade_on){
-    for(int i=0; i<decayRate; i++){
+    for(int i=0; i<State[0].decayRate; i++){
       leds[random16(NUM_LEDS_PER_STRIP*NUM_STRIPS)] = CHSV(0,0,0);
     }
   }
   else{
-    fadeToBlackBy(leds,NUM_LEDS_PER_STRIP*NUM_STRIPS,decayRate);
+    fadeToBlackBy(leds,NUM_LEDS_PER_STRIP*NUM_STRIPS,State[0].decayRate);
   }
 }
 
 boolean digital_fade_after_on = false;
 void digital_fade_after(void){
    if (digital_fade_after_on){
-    for(int i=0; i<decayRate*2; i++){
+    for(int i=0; i<State[0].decayRate*2; i++){
       leds[random16(NUM_LEDS_PER_STRIP*NUM_STRIPS)] = CHSV(0,0,0);
     }
   }
@@ -170,7 +173,7 @@ void command_on_notes(void){
           State[0].note_brightness[i] = sin_amp * sin(pitch_counter) + sin_offset;
         }
         // Only refill them if we're in the right block of time
-        if (millis() < (last_turn_on_time + (float(strobe_length_ms) / 2))){
+        if (millis() < (last_turn_on_time + (float(State[0].strobe_length_ms) / 2))){
           if (State[0].curr_manual_mode == NOTE_RAINBOW){
             note_rainbow(note_regions[j][0], note_regions[j][1], i);
           }
@@ -204,7 +207,7 @@ void command_white_on_notes(void){
       // Loop through all regions for that note and fill them
       for(int j = region_start; j<region_end;j++){
         // Only refill them if we're in the right block of time
-        if (millis() < (last_turn_on_time + (float(strobe_length_ms) / 2))){ 
+        if (millis() < (last_turn_on_time + (float(State[0].strobe_length_ms) / 2))){ 
           fill_gradient(leds, note_regions[j][0], CHSV(0, 0, white_note_brightness[i]) , note_regions[j][1], CHSV(0, 0, white_note_brightness[i]), SHORTEST_HUES);
         
       }
@@ -308,7 +311,6 @@ void processMIDI(void) {
       if (data1 == 120) {
         // Last note = 120, do rainbow toggle mode, swithc manual mode
         symmetric_mode_on = !symmetric_mode_on;
-        //gCurrentPatternNumber = 0;
       }
       if (data1 < (State[0].curr_lowest_note + NUM_NOTES)){
         if (channel != 1){
@@ -375,7 +377,7 @@ void processMIDI(void) {
       }
       else if (data1 == 1){
         //decayRate = (255*127/126)/max(1,data2)-(255/126);
-        decayRate = map(max(1,data2), 1,127, 255,2);
+        State[0].decayRate = map(max(1,data2), 1,127, 255,2);
         pulsing_time_scale = float(max(0,data2) * (MAX_PULSE_SCALE-MIN_PULSE_SCALE) / 127.0 + MIN_PULSE_SCALE);
       }
       //decayRate = map(max(1,data2), 1,127, 255,2);
@@ -403,10 +405,10 @@ void processMIDI(void) {
       Serial.println(data1);
       Serial.println(data2); //+ data2 * 128, DEC);
       // Set strobe length to scaled pitch value
-      strobe_length_ms = map(data2, 65, 128, MAX_STROBE_LENGTH, MIN_STROBE_LENGTH);
+      State[0].strobe_length_ms = map(data2, 65, 128, MAX_STROBE_LENGTH, MIN_STROBE_LENGTH);
       // If the pitch wheel is below the default, no strobe
       if (data2 <= PITCH_CENTER_VALUE){
-        strobe_length_ms = NO_STROBE_LENGTH;
+        State[0].strobe_length_ms = NO_STROBE_LENGTH;
         // Update timing for center fill
         center_counter_inc = data2 * CENTER_COUNTER_INC_MAX / 64.0;
       }
