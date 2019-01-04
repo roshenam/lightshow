@@ -28,7 +28,7 @@
 #define MAX_PULSE_SCALE .6
 #define MIN_PULSE_SCALE .0175
 #define NO_STROBE_LENGTH 10
-#define NOTE_RAINBOW_INC_MAX 35.0
+#define NOTE_RAINBOW_INC_MAX 15.0
 #define CENTER_COUNTER_INC_MAX 6 // how fast the pulses move
 #define PITCH_CENTER_VALUE 64
 #define STANDING_WAVE_WIDTH 60 // led/s between 5 and 120
@@ -204,11 +204,11 @@ void loop() {
   
     // Everything will constantly be faded out, then immediately
     // reset to its full brightness for all regions that are on
-    //fadeToBlackBy(leds,NUM_LEDS_PER_STRIP*NUM_STRIPS,decayRate);
-    fade_all();
+    fadeToBlackBy(leds,NUM_LEDS_PER_STRIP*NUM_STRIPS,decayRate);
+    //fade_all();
     command_on_notes();
     command_white_on_notes();
-    digital_fade_after();
+    //digital_fade_after();
     LEDS.show();
   }
   //LEDS.delay(20);
@@ -610,12 +610,12 @@ void note_rainbow(int region_start, int region_end, int note_num){
     else if(color_scheme_index < 3){
       fill_rain(color_scheme_index, region_start, region_end, note_num);
     }
-    else if((color_scheme_index >=10) and (color_scheme_index <= 12)){
-      fill_noise(color_scheme_index, region_start, region_end, note_num);
-    }
+//    else if((color_scheme_index >=10) and (color_scheme_index <= 12)){
+//      fill_noise(color_scheme_index, region_start, region_end, note_num);
+//    }
     else{
-      //fill_multicolor(region_start, region_end, note_num);
-      fill_noise(color_scheme_index, region_start, region_end, note_num);
+      fill_multicolor(region_start, region_end, note_num);
+      //fill_noise(color_scheme_index, region_start, region_end, note_num);
     }
   //gradient_counter += rainbow_hue_inc;
   note_hue[note_num] += rainbow_hue_inc;
